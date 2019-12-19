@@ -14,9 +14,53 @@ export interface Swagger2Definition {
   type?: 'array' | 'boolean' | 'integer' | 'number' | 'object' | 'string';
 }
 
+export interface Swagger2Parameter {
+  name: string;
+  in: 'body' | 'query' | 'path';
+  description: string;
+  required: boolean;
+  schema?: { $ref?: string; type?: string };
+  type?: string;
+  pattern?: string;
+  items?: {
+    type?: string;
+    refs?: string;
+  };
+}
+
+export interface Swagger2Response {
+  description: string;
+  schema?: {
+    type?: string;
+    $ref?: string;
+    items?: {
+      type?: string;
+      $ref?: string;
+    };
+  };
+}
+
+export interface Swagger2Method {
+  tags: Array<string>;
+  summary?: string;
+  parameters?: Array<Swagger2Parameter>;
+  responses: {
+    [code: string]: Swagger2Response;
+  };
+}
+
 export interface Swagger2 {
+  info: {
+    title: string;
+    version: string;
+  };
   definitions: {
     [index: string]: Swagger2Definition;
+  };
+  paths: {
+    [url: string]: {
+      [method: string]: Swagger2Method;
+    };
   };
 }
 
@@ -59,11 +103,8 @@ function spacesToUnderscores(name: string): string {
 }
 
 function parse(spec: Swagger2, options: Swagger2Options = {}): string {
-  const shouldUseWrapper = options.wrapper !== false;
-  const wrapper =
-    typeof options.wrapper === 'string' && options.wrapper
-      ? options.wrapper
-      : 'declare namespace OpenAPI2';
+  // 使用info的title作为namespace
+  const wrapper = `declare namespace ${spec.info.title.replace(/\s|-|_/g, '')}`;
   const shouldCamelCase = options.camelcase || false;
   const shouldInsertWarning = options.injectWarning || false;
 
@@ -75,7 +116,7 @@ function parse(spec: Swagger2, options: Swagger2Options = {}): string {
     output.push(warningMessage);
   }
 
-  if (wrapper && shouldUseWrapper) {
+  if (wrapper) {
     output.push(`${wrapper} {`);
   }
 
@@ -232,9 +273,85 @@ function parse(spec: Swagger2, options: Swagger2Options = {}): string {
     buildNextInterface();
   }
 
-  if (wrapper && shouldUseWrapper) {
-    output.push('}'); // Close namespace
+  //开始解析paths
+  function methodOutputParse(u: string, m: string, method: Swagger2Method): string {
+    u = u.replace(/^\//, ''); //移除第一个/
+    const comments: Array<string> = [];
+    //1. 构造方法名
+    const methodName = u
+      .split('/')
+      .map((c, i) => {
+        c = c.replace(/{|}/g, '');
+        return i == 0 ? c : c.charAt(0).toUpperCase() + c.substr(1);
+      })
+      .join('');
+    if (method.summary) {
+      comments.push(method.summary);
+    } else {
+      comments.push(methodName);
+    }
+    //2. 构造入参
+    const methodArgs: Array<string> = (method.parameters || []).map((o, i) => {
+      comments.push(`@param ${o.name} ${o.description || ''}`);
+      if (o.type) {
+        if (o.type == 'array') {
+          const gen = o.items ? (o.items.type ? o.items.type : getRef(o.items.refs as any)[0]) : '';
+          return `${o.name} :Array<${gen}>`;
+        }
+        return `${o.name} :${o.type}`;
+      } else if (o.schema) {
+        return `${o.name} :${o.schema.type ? o.schema.type : getRef(o.schema?.$ref as string)[0]}`;
+      } else {
+        return `${o.name} :any`;
+      }
+    });
+    //3. 默认只拿第一个返回的
+    const firstResponse = method.responses[Object.keys(method.responses)[0]];
+    comments.push(`@return ${firstResponse.description || ''}`);
+    let methodResult = '';
+    if (firstResponse.schema && firstResponse.schema.type) {
+      if (firstResponse.schema.type == 'array') {
+        const gen = firstResponse.schema.items
+          ? firstResponse.schema.items.type
+            ? firstResponse.schema.items.type
+            : getRef(firstResponse.schema.items.$ref as any)[0]
+          : '';
+        methodResult = `Array<${gen}>`;
+      } else if (firstResponse.schema.type) {
+        methodResult = `${firstResponse.schema.type}`;
+      } else if (firstResponse.schema.$ref) {
+        methodResult = getRef(firstResponse.schema.$ref as any)[0];
+      } else {
+        methodResult = 'any';
+      }
+    } else if (firstResponse.schema) {
+      methodResult = getRef(firstResponse.schema.$ref as string)[0];
+    } else {
+      methodResult = '';
+    }
+    return `
+/**
+ * ${comments.join('\n  * ')}
+ */
+export function ${methodName}(${methodArgs.join(', ')}): ${methodResult} {
+   ${methodResult ? 'return' : ''}
+}
+
+    `;
   }
+
+  let methodOutput: Array<string> = [];
+  const { paths } = spec;
+  for (let url in paths) {
+    for (let method in paths[url]) {
+      let mm = paths[url][method];
+      methodOutput.push(methodOutputParse(url, method, mm));
+    }
+  }
+
+  output.push(methodOutput.join('\n'));
+
+  output.push('}'); // Close namespace
 
   return prettier.format(output.join('\n'), { parser: 'typescript', singleQuote: true });
 }

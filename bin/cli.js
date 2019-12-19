@@ -16,11 +16,14 @@ Usage
 Options
   --help                display this
   --wrapper, -w         specify wrapper (default: "declare namespace OpenAPI2")
-  --output, -o          specify output file
   --camelcase, -c       convert snake_case properties to camelCase (default: off)
   --swagger, -s         specify Swagger version (default: 2)
   --nowrapper -nw       disables rendering the wrapper
   --injectWarning -iw   injects a warning at the top of the generated file (default: off)
+  --npmServer           推送到的npm私服地址
+  --npmUser             登录用户
+  --npmPassword         登录密码
+  --npmPrefix           发布前缀, 比如swagger里面name是test, 配置项为@xxx, 那么会推送过去变为 @xxx/test 这样
 `,
   {
     flags: {
@@ -33,10 +36,6 @@ Options
         type: 'string',
         default: 'declare namespace OpenAPI2',
         alias: 'w',
-      },
-      output: {
-        type: 'string',
-        alias: 'o',
       },
       swagger: {
         type: 'number',
@@ -57,6 +56,18 @@ Options
       injectWarning: {
         type: 'boolean',
         alias: 'iw',
+      },
+      npmServer: {
+        type: 'string',
+      },
+      npmUser: {
+        type: 'string',
+      },
+      npmPassword: {
+        type: 'string',
+      },
+      npmPrefix: {
+        type: 'string',
       },
     },
   }
@@ -110,19 +121,18 @@ if (cli.flags.nowrapper) {
 
 const result = swaggerToTS(spec, cli.flags);
 
-// Write to file if specifying output
-if (cli.flags.output) {
-  const timeStart = process.hrtime();
-  const outputFile = resolve(process.cwd(), cli.flags.output);
-  const parent = dirname(outputFile);
-  mkdirpSync(parent);
-  writeFileSync(outputFile, result);
 
-  const timeEnd = process.hrtime(timeStart);
-  const time = timeEnd[0] + Math.round(timeEnd[1] / 1e6);
-  console.log(chalk.green(`🚀 ${cli.input[0]} -> ${chalk.bold(cli.flags.output)} [${time}ms]`));
-  return;
-}
+//
+const timeStart = process.hrtime();
+const outputFile = resolve(process.cwd(), cli.flags.output);
+const parent = dirname(outputFile);
+mkdirpSync(parent);
+writeFileSync(outputFile, result);
+
+const timeEnd = process.hrtime(timeStart);
+const time = timeEnd[0] + Math.round(timeEnd[1] / 1e6);
+console.log(chalk.green(`🚀 ${cli.input[0]} -> ${chalk.bold(cli.flags.output)} [${time}ms]`));
+return;
 
 // Otherwise, return result
 return result;
